@@ -1,11 +1,12 @@
 package redis.netty4;
 
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.SettableFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
-import spullara.util.concurrent.Promise;
 
 import java.net.InetSocketAddress;
 import java.util.LinkedList;
@@ -18,23 +19,23 @@ public class RedisClientBase {
 
   private final static NioEventLoopGroup group = new NioEventLoopGroup(Runtime.getRuntime().availableProcessors());
   private final SocketChannel socketChannel;
-  private final Queue<Promise<Reply>> queue;
+  private final Queue<SettableFuture<Reply>> queue;
 
-  protected RedisClientBase(SocketChannel socketChannel, Queue<Promise<Reply>> queue) {
+  protected RedisClientBase(SocketChannel socketChannel, Queue<SettableFuture<Reply>> queue) {
     this.socketChannel = socketChannel;
     this.queue = queue;
     group.register(socketChannel);
   }
 
-  public static Promise<RedisClientBase> connect(String host, int port) {
-    final Queue<Promise<Reply>> queue = new LinkedList<>();
+  public static ListenableFuture<RedisClientBase> connect(String host, int port) {
+    final Queue<SettableFuture<Reply>> queue = new LinkedList<>();
     SocketChannel socketChannel = new NioSocketChannel();
     final RedisClientBase client = new RedisClientBase(socketChannel, queue);
     socketChannel.pipeline().addLast(new RedisCommandEncoder(), new RedisReplyDecoder(),
             new SimpleChannelInboundHandler<Reply<?>>() {
               @Override
               protected void channelRead0(ChannelHandlerContext channelHandlerContext, Reply<?> reply) throws Exception {
-                Promise<Reply> poll;
+                SettableFuture<Reply> poll;
                 synchronized (client) {
                   poll = queue.poll();
                   if (poll == null) {
@@ -44,13 +45,13 @@ public class RedisClientBase {
                 poll.set(reply);
               }
             });
-    final Promise<RedisClientBase> promise = new Promise<>();
-    socketChannel.connect(new InetSocketAddress(host, port)).addListener(new ChannelFutureListenerPromiseAdapter<>(promise, client));
-    return promise;
+    final SettableFuture<RedisClientBase> future = SettableFuture.create();
+    socketChannel.connect(new InetSocketAddress(host, port)).addListener(new ChannelFutureListenerPromiseAdapter<>(future, client));
+    return future;
   }
 
-  public Promise<Reply> send(Command command) {
-    Promise<Reply> reply = new Promise<>();
+  public ListenableFuture<Reply> send(Command command) {
+    SettableFuture<Reply> reply = SettableFuture.create();
     synchronized (this) {
       queue.add(reply);
       socketChannel.writeAndFlush(command);

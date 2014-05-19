@@ -24,11 +24,6 @@
       <artifactId>netty4</artifactId>
       <version>0.8-SNAPSHOT</version>
     </dependency>
-    <dependency>
-      <groupId>com.github.spullara.java</groupId>
-      <artifactId>concurrent6</artifactId>
-      <version>0.1.0</version>
-    </dependency>
   </dependencies>
 
   <build>

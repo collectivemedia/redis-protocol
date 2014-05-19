@@ -1,8 +1,10 @@
 package redis.netty4;
 
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.MoreExecutors;
 import org.junit.Test;
 import redis.util.Encoding;
-import spullara.util.functions.Block;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -25,28 +27,38 @@ public class RedisClientTest {
     final CountDownLatch countDownLatch = new CountDownLatch(1);
     final AtomicBoolean success = new AtomicBoolean();
     final AtomicBoolean matches = new AtomicBoolean();
-    connect("localhost", 6379).onSuccess(new Block<RedisClientBase>() {
+    Futures.addCallback(connect("localhost", 6379), new FutureCallback<RedisClientBase>() {
       @Override
-      public void apply(final RedisClientBase client) {
-        client.send(new Command("SET", "test", "value")).onSuccess(new Block<Reply>() {
+      public void onSuccess(final RedisClientBase client) {
+        Futures.addCallback(client.send(new Command("SET", "test", "value")), new FutureCallback<Reply>() {
           @Override
-          public void apply(Reply reply) {
+          public void onSuccess(Reply reply) {
             success.set(reply.data().equals("OK"));
-            client.send(new Command("GET", "test")).onSuccess(new Block<Reply>() {
+            Futures.addCallback(client.send(new Command("GET", "test")), new FutureCallback<Reply>() {
               @Override
-              public void apply(Reply reply) {
+              public void onSuccess(Reply reply) {
                 if (reply instanceof BulkReply) {
                   matches.set(((BulkReply) reply).asAsciiString().equals("value"));
                 }
                 countDownLatch.countDown();
               }
+
+              @Override
+              public void onFailure(Throwable t) {
+
+              }
             });
+          }
+
+          @Override
+          public void onFailure(Throwable t) {
+
           }
         });
       }
-    }).onFailure(new Block<Throwable>() {
+
       @Override
-      public void apply(Throwable throwable) {
+      public void onFailure(Throwable t) {
         countDownLatch.countDown();
       }
     });
@@ -61,33 +73,36 @@ public class RedisClientTest {
     final CountDownLatch countDownLatch = new CountDownLatch(1);
     final AtomicInteger calls = new AtomicInteger(0);
 
-    Block<RedisClientBase> benchmark = new Block<RedisClientBase>() {
+    long start = System.currentTimeMillis();
+    Futures.addCallback(connect("localhost", 6379), new FutureCallback<RedisClientBase>() {
       @Override
-      public void apply(final RedisClientBase client) {
+      public void onSuccess(final RedisClientBase client) {
         int i = calls.getAndIncrement();
         if (i == CALLS) {
           countDownLatch.countDown();
         } else {
-          final Block<RedisClientBase> thisBenchmark = this;
-          client.send(new Command("SET", Encoding.numToBytes(i), "value")).onSuccess(new Block<Reply>() {
+          final FutureCallback<RedisClientBase> thisBenchmark = this;
+          Futures.addCallback(client.send(new Command("SET", Encoding.numToBytes(i), "value")), new FutureCallback<Reply>() {
             @Override
-            public void apply(Reply reply) {
-              thisBenchmark.apply(client);
+            public void onSuccess(Reply reply) {
+              thisBenchmark.onSuccess(client);
+            }
+
+            @Override
+            public void onFailure(Throwable t) {
+
             }
           });
         }
       }
-    };
 
-    long start = System.currentTimeMillis();
-    connect("localhost", 6379).onSuccess(benchmark).onFailure(new Block<Throwable>() {
       @Override
-      public void apply(Throwable throwable) {
+      public void onFailure(Throwable t) {
         countDownLatch.countDown();
       }
     });
     countDownLatch.await();
-    System.out.println("Netty4: " + CALLS  * 1000 / (System.currentTimeMillis() - start));
+    System.out.println("Netty4: " + CALLS * 1000 / (System.currentTimeMillis() - start));
   }
 
   @Test
@@ -98,14 +113,14 @@ public class RedisClientTest {
     final Semaphore semaphore = new Semaphore(100);
     for (int i = 0; i < CALLS; i++) {
       semaphore.acquire();
-      client.send(new Command("SET", Encoding.numToBytes(i), "value")).ensure(new Runnable() {
+      client.send(new Command("SET", Encoding.numToBytes(i), "value")).addListener(new Runnable() {
         @Override
         public void run() {
           semaphore.release();
         }
-      });
+      }, MoreExecutors.sameThreadExecutor());
     }
     semaphore.acquire(50);
-    System.out.println("Netty4 pipelined: " + CALLS  * 1000 / (System.currentTimeMillis() - start));
+    System.out.println("Netty4 pipelined: " + CALLS * 1000 / (System.currentTimeMillis() - start));
   }
 }
