@@ -57,5 +57,10 @@ public class RedisClientBase {
       socketChannel.writeAndFlush(command);
     }
     return reply;
+
+  public ListenableFuture<Void> close() {
+    final SettableFuture<Void> future = SettableFuture.create();
+    socketChannel.close().addListener(new ChannelFutureListenerPromiseAdapter<>(future, null));
+    return future;
   }
 }
