@@ -1,126 +1,85 @@
 package redis.netty4;
 
-import com.google.common.util.concurrent.FutureCallback;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.MoreExecutors;
-import org.junit.Test;
-import redis.util.Encoding;
+import com.google.common.base.Throwables;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.util.concurrent.*;
+import com.pholser.junit.quickcheck.ForAll;
+import org.junit.After;
+import org.junit.contrib.theories.Theories;
+import org.junit.contrib.theories.Theory;
+import org.junit.runner.RunWith;
 
-import java.util.concurrent.CountDownLatch;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.Executors;
 
-import static junit.framework.Assert.assertTrue;
-import static redis.netty4.RedisClientBase.connect;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.junit.Assert.assertEquals;
 
-/**
- * Some tests for the client.
- */
+
+@RunWith(Theories.class)
 public class RedisClientTest {
+  private final RedisClientFactory factory = new RedisClientFactory();
 
-  public static final long CALLS = 1000000;
-
-  @Test
-  public void testSetGet() throws InterruptedException {
-    final CountDownLatch countDownLatch = new CountDownLatch(1);
-    final AtomicBoolean success = new AtomicBoolean();
-    final AtomicBoolean matches = new AtomicBoolean();
-    Futures.addCallback(connect("localhost", 6379), new FutureCallback<RedisClientBase>() {
-      @Override
-      public void onSuccess(final RedisClientBase client) {
-        Futures.addCallback(client.send(new Command("SET", "test", "value")), new FutureCallback<Reply>() {
-          @Override
-          public void onSuccess(Reply reply) {
-            success.set(reply.data().equals("OK"));
-            Futures.addCallback(client.send(new Command("GET", "test")), new FutureCallback<Reply>() {
-              @Override
-              public void onSuccess(Reply reply) {
-                if (reply instanceof BulkReply) {
-                  matches.set(((BulkReply) reply).asAsciiString().equals("value"));
-                }
-                countDownLatch.countDown();
-              }
-
-              @Override
-              public void onFailure(Throwable t) {
-
-              }
-            });
-          }
-
-          @Override
-          public void onFailure(Throwable t) {
-
-          }
-        });
-      }
-
-      @Override
-      public void onFailure(Throwable t) {
-        countDownLatch.countDown();
-      }
-    });
-    countDownLatch.await();
-    assertTrue(success.get());
-    assertTrue(matches.get());
+  @After
+  public void closeFactory() throws Exception {
+    factory.shutdown(10, 5000, MILLISECONDS).get();
   }
 
-  @Test
-  public void testBenchmark() throws InterruptedException {
-    if (System.getenv().containsKey("CI") || System.getProperty("CI") != null) return;
-    final CountDownLatch countDownLatch = new CountDownLatch(1);
-    final AtomicInteger calls = new AtomicInteger(0);
-
-    long start = System.currentTimeMillis();
-    Futures.addCallback(connect("localhost", 6379), new FutureCallback<RedisClientBase>() {
-      @Override
-      public void onSuccess(final RedisClientBase client) {
-        int i = calls.getAndIncrement();
-        if (i == CALLS) {
-          countDownLatch.countDown();
-        } else {
-          final FutureCallback<RedisClientBase> thisBenchmark = this;
-          Futures.addCallback(client.send(new Command("SET", Encoding.numToBytes(i), "value")), new FutureCallback<Reply>() {
-            @Override
-            public void onSuccess(Reply reply) {
-              thisBenchmark.onSuccess(client);
-            }
-
-            @Override
-            public void onFailure(Throwable t) {
-
-            }
-          });
-        }
-      }
-
-      @Override
-      public void onFailure(Throwable t) {
-        countDownLatch.countDown();
-      }
-    });
-    countDownLatch.await();
-    System.out.println("Netty4: " + CALLS * 1000 / (System.currentTimeMillis() - start));
-  }
-
-  @Test
-  public void testPipelinedBenchmark() throws ExecutionException, InterruptedException {
-    if (System.getenv().containsKey("CI") || System.getProperty("CI") != null) return;
-    long start = System.currentTimeMillis();
-    RedisClientBase client = connect("localhost", 6379).get();
-    final Semaphore semaphore = new Semaphore(100);
-    for (int i = 0; i < CALLS; i++) {
-      semaphore.acquire();
-      client.send(new Command("SET", Encoding.numToBytes(i), "value")).addListener(new Runnable() {
+  @Theory
+  public void testHSetGet(@ForAll final Map<Integer, Integer> map) throws Throwable {
+    final ListeningExecutorService executorService = MoreExecutors.listeningDecorator(Executors.newCachedThreadPool());
+    final RedisClient client = factory.connect("localhost", 6379).get();
+    final List<ListenableFuture> futures = new ArrayList<>(20);
+    for (int i = 0; i < 20; i++) {
+      final String key = "test-" + i;
+      final ListenableFuture<?> future = executorService.submit(new Runnable() {
         @Override
         public void run() {
-          semaphore.release();
+          try {
+            for (int j = 0; j < 5; j++) {
+              Futures.transform(client.hkeys(key), new AsyncFunction<MultiBulkReply, IntegerReply>() {
+                @Override
+                public ListenableFuture<IntegerReply> apply(MultiBulkReply multiBulkReply) throws Exception {
+                  if (multiBulkReply.data().length > 0) {
+                    return client.hdel(key, multiBulkReply.data());
+                  } else {
+                    return Futures.immediateFuture(new IntegerReply(0));
+                  }
+                }
+              }).get();
+              assertEquals(ImmutableMap.<String, String>of(), client.hgetall(key).get().asStringMap(UTF_8));
+              Map<String, String> expected = new HashMap<>();
+              for (Map.Entry<Integer, Integer> entry : map.entrySet()) {
+                final String key1 = key + "-" + j + "-" + entry.getKey();
+                final String value1 = key + "-" + j + "-" + entry.getValue();
+                assertEquals(1, (long) client.hset(key, key1, value1).get().data());
+                expected.put(key1, value1);
+                assertEquals(expected, client.hgetall(key).get().asStringMap(UTF_8));
+              }
+            }
+          } catch (Exception e) {
+            Throwables.propagate(e);
+          }
         }
-      }, MoreExecutors.sameThreadExecutor());
+      });
+      futures.add(future);
     }
-    semaphore.acquire(50);
-    System.out.println("Netty4 pipelined: " + CALLS * 1000 / (System.currentTimeMillis() - start));
+    try {
+      for (ListenableFuture future : futures) {
+        future.get();
+      }
+    } catch (ExecutionException e) {
+      throw e.getCause();
+    } finally {
+      executorService.shutdown();
+      executorService.awaitTermination(10, SECONDS);
+      client.close().get();
+    }
   }
 }

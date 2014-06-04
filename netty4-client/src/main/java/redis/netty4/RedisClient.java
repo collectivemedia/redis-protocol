@@ -1,7 +1,6 @@
 package redis.netty4;
 
 import com.google.common.base.Charsets;
-import com.google.common.base.Function;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 
@@ -19,7 +18,7 @@ public class RedisClient {
   private final RedisClientBase redisClientBase;
   private int version = 9999999;
 
-  private RedisClient(RedisClientBase redisClientBase) {
+  RedisClient(RedisClientBase redisClientBase) {
     this.redisClientBase = redisClientBase;
   }
 
@@ -36,16 +35,6 @@ public class RedisClient {
       }
     }
     return version;
-  }
-
-  public static ListenableFuture<RedisClient> connect(String host, int port) {
-    final ListenableFuture<RedisClientBase> redisClientBaseListenableFuture = RedisClientBase.connect(host, port);
-    return Futures.transform(redisClientBaseListenableFuture, new Function<RedisClientBase, RedisClient>() {
-      @Override
-      public RedisClient apply(RedisClientBase redisClientBase) {
-        return new RedisClient(redisClientBase);
-      }
-    });
   }
 
   public ListenableFuture<Void> close() {

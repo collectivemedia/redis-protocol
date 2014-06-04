@@ -12,7 +12,7 @@ import redis.netty4.Reply;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
-import static junit.framework.Assert.assertEquals;
+import static org.junit.Assert.assertEquals;
 import static redis.util.Encoding.numToBytes;
 
 /**
@@ -82,7 +82,7 @@ public class CommandTest {
       }
       long end = System.currentTimeMillis();
       long diff = end - start;
-      System.out.println(diff + " " + ((double)diff)/100000);
+      System.out.println(diff + " " + ((double) diff) / 100000);
       start = end;
     }
   }
