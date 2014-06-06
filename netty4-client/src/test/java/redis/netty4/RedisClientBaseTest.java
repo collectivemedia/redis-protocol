@@ -1,8 +1,10 @@
 package redis.netty4;
 
 import com.google.common.collect.ImmutableMap;
+import com.google.common.util.concurrent.AsyncFunction;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
 import org.junit.After;
 import org.junit.Test;
 import redis.util.Encoding;
@@ -10,12 +12,10 @@ import redis.util.Encoding;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
 /**
  * Some tests for the client.
@@ -32,46 +32,30 @@ public class RedisClientBaseTest {
   }
 
   @Test
-  public void testSetGet() throws InterruptedException {
-    final CountDownLatch countDownLatch = new CountDownLatch(1);
-    final AtomicBoolean success = new AtomicBoolean();
-    final AtomicBoolean matches = new AtomicBoolean();
-    Futures.addCallback(factory.connect("localhost", 6379), new FutureCallback<RedisClientBase>() {
-      @Override
-      public void onSuccess(final RedisClientBase client) {
-        Futures.addCallback(client.send(StatusReply.class, new Command("SET", "test", "value")), new FutureCallback<StatusReply>() {
-          @Override
-          public void onSuccess(StatusReply reply) {
-            success.set(reply.data().equals("OK"));
-            Futures.addCallback(client.send(BulkReply.class, new Command("GET", "test")), new FutureCallback<BulkReply>() {
-              @Override
-              public void onSuccess(BulkReply reply) {
-                matches.set(reply.asAsciiString().equals("value"));
-                countDownLatch.countDown();
-              }
-
-              @Override
-              public void onFailure(Throwable t) {
-
-              }
-            });
-          }
-
-          @Override
-          public void onFailure(Throwable t) {
-
-          }
-        });
-      }
-
-      @Override
-      public void onFailure(Throwable t) {
-        countDownLatch.countDown();
-      }
-    });
-    countDownLatch.await();
-    assertTrue(success.get());
-    assertTrue(matches.get());
+  public void testSetGet() throws Throwable {
+    try {
+      final ListenableFuture<Void> future = Futures.transform(factory.connect("localhost", 6379), new AsyncFunction<RedisClientBase, Void>() {
+        @Override
+        public ListenableFuture<Void> apply(final RedisClientBase client) throws Exception {
+          return Futures.transform(client.send(StatusReply.class, new Command("SET", "test", "value")), new AsyncFunction<StatusReply, Void>() {
+            @Override
+            public ListenableFuture<Void> apply(StatusReply statusReply) throws Exception {
+              assertEquals(statusReply.data(), "OK");
+              return Futures.transform(client.send(BulkReply.class, new Command("GET", "test")), new AsyncFunction<BulkReply, Void>() {
+                @Override
+                public ListenableFuture<Void> apply(BulkReply reply) {
+                  assertEquals(reply.asAsciiString(), "value");
+                  return client.close();
+                }
+              });
+            }
+          });
+        }
+      });
+      future.get();
+    } catch (ExecutionException e) {
+      throw e.getCause();
+    }
   }
 
   @Test
