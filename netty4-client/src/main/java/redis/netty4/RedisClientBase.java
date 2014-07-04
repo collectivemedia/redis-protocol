@@ -8,6 +8,7 @@ import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 
+import java.net.InetSocketAddress;
 import java.util.Queue;
 
 /**
@@ -47,6 +48,14 @@ public class RedisClientBase {
         }
       }
     });
+  }
+
+  public InetSocketAddress localAddress() {
+    return socketChannel.localAddress();
+  }
+
+  public InetSocketAddress remoteAddress() {
+    return socketChannel.remoteAddress();
   }
 
   public ListenableFuture<Void> close() {

@@ -4,6 +4,7 @@ import com.google.common.base.Charsets;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 
+import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -35,6 +36,14 @@ public class RedisClient {
       }
     }
     return version;
+  }
+
+  public InetSocketAddress localAddress() {
+    return redisClientBase.localAddress();
+  }
+
+  public InetSocketAddress remoteAddress() {
+    return redisClientBase.remoteAddress();
   }
 
   public ListenableFuture<Void> close() {
