@@ -10,16 +10,9 @@ import java.nio.charset.Charset;
 import static redis.util.Encoding.numToBytes;
 
 public class BulkReply implements Reply<ByteBuf> {
-  public static final BulkReply NIL_REPLY = new BulkReply();
-
   public static final char MARKER = '$';
   private final ByteBuf bytes;
   private final int capacity;
-
-  private BulkReply() {
-    bytes = null;
-    capacity = -1;
-  }
 
   public BulkReply(byte[] bytes) {
     this.bytes = Unpooled.wrappedBuffer(bytes);

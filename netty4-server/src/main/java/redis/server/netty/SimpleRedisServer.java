@@ -10,7 +10,6 @@ import java.util.*;
 
 import static java.lang.Double.parseDouble;
 import static java.lang.Integer.MAX_VALUE;
-import static redis.netty4.BulkReply.NIL_REPLY;
 import static redis.netty4.IntegerReply.integer;
 import static redis.netty4.StatusReply.OK;
 import static redis.netty4.StatusReply.QUIT;
@@ -18,7 +17,7 @@ import static redis.util.Encoding.bytesToNum;
 import static redis.util.Encoding.numToBytes;
 
 public class SimpleRedisServer implements RedisServer {
-
+  private static final BulkReply NIL_REPLY = new BulkReply((ByteBuf) null);
   private static final StatusReply PONG = new StatusReply("PONG");
   private long started = now();
 
